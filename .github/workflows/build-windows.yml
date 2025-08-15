@@ -1,0 +1,59 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      mayhem_url:
+        description: 'Mayhem URL'
+        required: true
+        default: 'https://app.mayhem.security'
+        type: string
+      workspace:
+        description: 'Mayhem Workspace'
+        required: true
+        default: 'dforbes'
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+        - name: Check out the repo
+          uses: actions/checkout@v5
+
+        - name: Set values
+          shell: pwsh
+          run: |
+            $mayhemUrl = if ([string]::IsNullOrEmpty("${{ inputs.mayhem_url }}")) { 'https://app.mayhem.security' } else { "${{ inputs.mayhem_url }}" }
+            $workspace = if ([string]::IsNullOrEmpty("${{ inputs.workspace }}")) { 'dforbes' } else { "${{ inputs.workspace }}" }
+            echo "MAYHEM_URL=$mayhemUrl" | Out-File -FilePath $env:GITHUB_ENV -Append
+            echo "WORKSPACE=$workspace" | Out-File -FilePath $env:GITHUB_ENV -Append
+        
+        - name: Install Mayhem
+          shell: pwsh
+          run: |
+            Invoke-WebRequest -Uri "https://app.mayhem.security/cli/Windows/mayhem.msi" -OutFile "mayhem.msi"
+            Start-Process msiexec.exe -ArgumentList "/i mayhem.msi /quiet /norestart" -Wait
+            echo "MAYHEM_PATH=C:\Program Files (x86)\Mayhem\mayhem.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+        
+        - name: Mayhem login
+          shell: pwsh
+          run: |
+            &$env:MAYHEM_PATH login "$env:MAYHEM_URL" "${{ secrets.MAYHEM_TOKEN }}"
+
+        - name: Build
+          run: |
+            cd cpp\windows
+            mkdir build
+            cd build
+            cmake ..
+
+        - name: Mayhem run
+          shell: pwsh
+          run: |
+            &$env:MAYHEM_PATH run --owner $env:WORKSPACE --project mayhem-examples --target cpp-windows-clang --duration 5m cpp\windows\_packages\mayhem_package_clang
